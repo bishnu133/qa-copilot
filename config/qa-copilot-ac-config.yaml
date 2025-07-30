@@ -1,0 +1,39 @@
+# Configuration for JIRA AC Parser
+
+ac_parser:
+  # Patterns to identify AC section start
+  section_start_patterns:
+    - "Acceptance\\s+Criteria"
+    - "AC\\s*#.*?Given.*?When.*?Then"
+    - "Acceptance\\s+Criteria\\s*:"
+
+  # Patterns to identify AC section end
+  section_end_patterns:
+    - "Checklists?:"
+    - "Comments?"
+    - "Description"
+    - "Tech\\s+Tasks?:"
+    - "Assumptions?:"
+    - "Feature\\s+Toggle:"
+
+  # Text replacements for cleaning
+  text_replacements:
+    given:
+      "A Privileged User who has access to User Management Listing Page logs into BAP": "I am on the User Management Listing Page"
+      "the system": "the application"
+    when:
+      "the user": ""
+      "clicks on": "click on"
+      "enters": "enter"
+    then:
+      "should be able to": "can"
+      "the user should": "I should"
+
+  # Default background steps for specific projects
+  project_backgrounds:
+    user_management:
+      - "Given I am logged in as a Privileged User"
+      - "And I have access to the User Management Listing Page"
+    admin_panel:
+      - "Given I am logged in as an Administrator"
+      - "And I am on the Admin Dashboard"

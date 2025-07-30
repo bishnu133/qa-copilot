@@ -1,0 +1,59 @@
+# config/environments/dev.yaml - Development Environment Configuration
+
+# Environment name
+environment: "development"
+
+# Base URLs
+base_url: "https://pph-web-gateway-ccsit.southeastasia.cloudapp.azure.com/web/h365-portal/"
+
+# API configuration
+api_config_path: "config/api_config.yaml"
+
+# Page mappings (application specific)
+pages:
+  login: "/"
+  dashboard: "/dashboard"
+  customer_care: "/customer-care"
+  challenges: "/challenges"
+  rewards: "/rewards"
+  participants: "/participants"
+
+# Role-based Credentials
+roles:
+  # Customer Care Role
+  customer_care:
+    username: "bishnu.sit"
+    password: "Qwerty@12345"
+
+  # Challenge Configuration Role
+  challenge_configurer:
+    username: "bishnu.sit"
+    password: "Qwerty@12345"
+
+  # Reward Configuration Role
+  reward_configurer:
+    username: "reward.admin"
+    password: "Reward@123"
+
+  # API Test User
+  api_tester:
+    username: "api.tester"
+    password: "ApiTest@123"
+
+# Legacy credentials (for backward compatibility)
+credentials:
+  test_user:
+    username: "bishnu.sit"
+    password: "Qwerty@12345"
+
+  admin:
+    username: "admin@h365.com"
+    password: "Admin@123"
+
+# Environment specific overrides (optional)
+# These override the default values in config.yaml if needed
+overrides:
+  browser:
+    headless: false  # Dev environment shows browser
+  logging:
+    level: "DEBUG"  # More verbose logging in dev

@@ -1,0 +1,42 @@
+# config/environments/dev.yaml
+environment: "development"
+base_url: "https://pph-web-gateway-ccsit.southeastasia.cloudapp.azure.com/web/h365-portal/"
+
+# Page mappings
+pages:
+  login: "/login"
+  login page: "/login"
+  dashboard: "/dashboard"
+  challenges: "/challenges"
+
+# Role-based credentials
+roles:
+  challenge_configurer:
+    username: "bishnu.sit"
+    password: "Qwerty@12345"
+  admin:
+    username: "admin@example.com"
+    password: "AdminPass123!"
+  user:
+    username: "user@example.com"
+    password: "UserPass123!"
+
+# Test configuration
+timeouts:
+  default: 30000
+  navigation: 60000
+
+# Element detection configuration
+detection:
+  strategies: ["dom", "heuristic"]
+  enable_ocr: false
+  enable_ml: false
+  fuzzy_match_threshold: 0.8
+
+# Executor configuration
+executor:
+  browser: "chromium"
+  headless: false
+  screenshot_on_failure: true
+  video_recording: false
+  use_nlp_parser: true  # Enable NLP parsing

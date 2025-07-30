@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env
+.venv
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Project specific
+/dist/
+/build/
+*.egg-info/
+.allure/
+reports/
+screenshots/
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Models (if using local AI)
+models/
+*.pt
+*.onnx
+*.bin

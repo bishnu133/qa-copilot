@@ -1,0 +1,9 @@
+detector:
+  strategies:
+  - dom
+  - heuristic
+  timeout: 30
+executor:
+  browser: chromium
+  headless: false
+project: test-project

@@ -1,0 +1,60 @@
+# config/environments/test.yaml
+
+# Test environment configuration
+environment: "test"
+
+# Base URLs for testing
+base_url: "https://www.saucedemo.com"
+
+# Alternative test sites
+test_sites:
+  saucedemo: "https://www.saucedemo.com"
+  example: "https://www.example.com"
+  w3schools: "https://www.w3schools.com"
+  google: "https://www.google.com"
+
+# Page mappings
+pages:
+  login: "/"
+  inventory: "/inventory.html"
+  cart: "/cart.html"
+  checkout: "/checkout-step-one.html"
+
+# Test credentials
+roles:
+  standard_user:
+    username: "standard_user"
+    password: "secret_sauce"
+  locked_user:
+    username: "locked_out_user"
+    password: "secret_sauce"
+  problem_user:
+    username: "problem_user"
+    password: "secret_sauce"
+
+# Legacy format for backward compatibility
+credentials:
+  valid_user:
+    username: "standard_user"
+    password: "secret_sauce"
+  invalid_user:
+    username: "invalid_user"
+    password: "wrong_password"
+
+# Test data
+test_data:
+  valid_product: "Sauce Labs Backpack"
+  search_term: "Playwright testing"
+
+# Timeouts and retries
+timeouts:
+  default: 30000
+  navigation: 60000
+  element: 10000
+
+# Browser settings
+browser:
+  viewport:
+    width: 1280
+    height: 720
+  user_agent: "Mozilla/5.0 (QA-Copilot Test Suite)"
