@@ -1,6 +1,6 @@
 # config/environments/dev.yaml
 environment: "development"
-base_url: "https://pph-web-gateway-ccsit.southeastasia.cloudapp.azure.com/web/h365-portal/"
+base_url: "https://example.com/"
 
 # Page mappings
 pages:

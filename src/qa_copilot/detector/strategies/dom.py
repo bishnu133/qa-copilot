@@ -34,7 +34,7 @@ class DOMStrategy(DetectionStrategy):
 
         logger.info(f"DOM Strategy - Looking for: type={element_type}, text={text}, attributes={attributes}")
 
-        # Special handling for button elements
+        # Special handling for button elements - ENHANCED
         if element_type == "button" or "button" in (text or "").lower():
             element = self._find_button_enhanced_sync(page, text, attributes)
             if element:
@@ -80,7 +80,7 @@ class DOMStrategy(DetectionStrategy):
 
         logger.info(f"DOM Strategy (Async) - Looking for: type={element_type}, text={text}, attributes={attributes}")
 
-        # Special handling for button elements
+        # Special handling for button elements - ENHANCED
         if element_type == "button" or "button" in (text or "").lower():
             element = await self._find_button_enhanced_async(page, text, attributes)
             if element:
@@ -176,14 +176,17 @@ class DOMStrategy(DetectionStrategy):
         ])
 
         if is_rich_text:
-            # Try to find the specific label first
-            label_element = await self._find_label_element_async(page, field_name)
+            # Enhanced rich text editor detection
+            logger.info(f"Detected rich text field: {field_name}")
 
-            if label_element:
-                # Look for rich text editor in the same form item as the label
-                try:
-                    # Find the parent form item container
-                    parent_container = await label_element.evaluate("""
+            # Strategy 1: Find by exact label match and look for editor in same container
+            try:
+                # Find all labels with exact text
+                labels = await page.locator(f'label:text-is("{field_name}")').all()
+
+                for label in labels:
+                    # Get the parent container (form item)
+                    parent_container = await label.evaluate("""
                         (el) => {
                             let current = el;
                             while (current && current.parentElement) {
@@ -193,80 +196,93 @@ class DOMStrategy(DetectionStrategy):
                                 if (classes.includes('ant-form-item') || 
                                     classes.includes('form-group') || 
                                     classes.includes('field-wrapper') ||
+                                    classes.includes('ant-row') ||
                                     classes.includes('ant-col')) {
-                                    return parent;
+                                    return parent.outerHTML;
                                 }
                                 current = parent;
                             }
-                            return el.parentElement;
+                            return el.parentElement ? el.parentElement.outerHTML : null;
                         }
                     """)
 
                     if parent_container:
-                        # Look for rich text editor within this specific container
-                        container_selectors = [
+                        # Look for editor within this container
+                        container_id = await label.evaluate("""
+                            (el) => {
+                                let current = el;
+                                while (current && current.parentElement) {
+                                    const parent = current.parentElement;
+                                    if (parent.id) return parent.id;
+                                    const classes = parent.className || '';
+                                    if (classes.includes('ant-form-item') || 
+                                        classes.includes('form-group')) {
+                                        // Generate a unique identifier
+                                        return 'container_' + Math.random().toString(36).substr(2, 9);
+                                    }
+                                    current = parent;
+                                }
+                                return null;
+                            }
+                        """)
+
+                        # Try to find editor in the specific container
+                        editor_selectors = [
                             '.ql-editor',
                             '[contenteditable="true"]',
                             '.rich-text-editor',
-                            '.editor-content'
+                            '.editor-content',
+                            '[role="textbox"][contenteditable="true"]',
                         ]
 
-                        for selector in container_selectors:
-                            try:
-                                # Use evaluate to find editor within the specific container
-                                editor_element = await page.evaluate_handle("""
-                                    (args) => {
-                                        const container = args.container;
-                                        const selector = args.selector;
-                                        return container.querySelector(selector);
-                                    }
-                                """, {'container': parent_container, 'selector': selector})
+                        for selector in editor_selectors:
+                            # Get all editors on page
+                            all_editors = await page.locator(selector).all()
 
-                                if editor_element:
-                                    element = page.locator(f"{selector}").nth(0)
-                                    # Verify this is the right element by checking if it's in the same container
-                                    is_correct = await element.evaluate("""
-                                        (el, labelText) => {
-                                            // Find the closest form item
-                                            let formItem = el.closest('.ant-form-item, .form-group, .field-wrapper');
-                                            if (!formItem) return false;
-
-                                            // Check if this form item contains our label
-                                            const labels = formItem.querySelectorAll('label');
+                            for editor in all_editors:
+                                # Check if editor is in our container
+                                is_in_container = await editor.evaluate("""
+                                    (el, fieldName) => {
+                                        // Walk up the DOM tree
+                                        let current = el;
+                                        while (current && current.parentElement) {
+                                            // Check for labels in parent
+                                            const labels = current.parentElement.querySelectorAll('label');
                                             for (let label of labels) {
-                                                if (label.textContent.includes(labelText)) {
+                                                if (label.textContent.trim() === fieldName) {
                                                     return true;
                                                 }
                                             }
-                                            return false;
+                                            current = current.parentElement;
                                         }
-                                    """, field_name)
+                                        return false;
+                                    }
+                                """, field_name)
 
-                                    if is_correct and await element.is_visible():
-                                        logger.info(f"Found correct rich text editor for label '{field_name}'")
-                                        return element
-                            except Exception as e:
-                                logger.debug(f"Container selector {selector} failed: {e}")
-                                continue
-                except Exception as e:
-                    logger.debug(f"Failed to find parent container: {e}")
+                                if is_in_container and await editor.is_visible():
+                                    logger.info(f"Found rich text editor for '{field_name}' using container search")
+                                    return editor
 
-            # Fallback: Try more specific selectors
+            except Exception as e:
+                logger.debug(f"Container search failed: {e}")
+
+            # Strategy 2: Try more specific selectors
             rich_selectors = [
-                # Very specific: label text exact match
-                f'label:text-is("{field_name}") + div .ql-editor',
-                f'label:text-is("{field_name}") ~ div .ql-editor',
+                # Direct label + editor combinations
+                f'label:text-is("{field_name}") + * .ql-editor',
+                f'label:text-is("{field_name}") ~ * .ql-editor',
+                f'div:has(> label:text-is("{field_name}")) .ql-editor',
                 f'.ant-form-item:has(label:text-is("{field_name}")) .ql-editor',
                 f'.ant-row:has(label:text-is("{field_name}")) .ql-editor',
-                # With partial match
-                f'label:has-text("{field_name}") + div .ql-editor',
-                f'label:has-text("{field_name}") ~ div .ql-editor',
-                f'div:has(label:has-text("{field_name}")) .ql-editor',
-                f'.ant-form-item:has(label:has-text("{field_name}")) .ql-editor',
-                # Generic contenteditable
-                f'label:text-is("{field_name}") + div [contenteditable="true"]',
-                f'label:text-is("{field_name}") ~ div [contenteditable="true"]',
+
+                # With contenteditable
+                f'label:text-is("{field_name}") + * [contenteditable="true"]',
+                f'label:text-is("{field_name}") ~ * [contenteditable="true"]',
                 f'.ant-form-item:has(label:text-is("{field_name}")) [contenteditable="true"]',
+
+                # Try with partial matches if exact doesn't work
+                f'label:has-text("{field_name}") + * .ql-editor',
+                f'label:has-text("{field_name}") ~ * .ql-editor',
             ]
 
             for selector in rich_selectors:
@@ -282,7 +298,12 @@ class DOMStrategy(DetectionStrategy):
                     logger.debug(f"Rich text selector {selector} failed: {e}")
                     continue
 
-        # Continue with standard label-based search
+        # Continue with standard input field detection...
+        return await self._find_standard_input_field_async(page, field_name)
+
+    async def _find_standard_input_field_async(self, page: AsyncPage, field_name: str) -> Optional[AsyncLocator]:
+        """Find standard input fields"""
+        # Strategy 1: Direct label with 'for' attribute
         label_element = await self._find_label_element_async(page, field_name)
         if label_element:
             input_element = await self._find_input_from_label_async(page, label_element)
@@ -893,78 +914,178 @@ class DOMStrategy(DetectionStrategy):
 
         return list(set(variations))
 
-    # Keep all the existing methods below this line unchanged
     def _find_button_enhanced_sync(self, page: SyncPage, text: str, attributes: Dict) -> Optional[SyncLocator]:
         """Enhanced button finding logic - synchronous"""
         logger.info(f"Enhanced button search for: {text}")
 
-        selectors = self._get_button_selectors(text)
+        # Comprehensive button selectors
+        selectors = [
+            # Exact text match
+            f'button:text-is("{text}")',
+            f'button:has-text("{text}")',
+
+            # Ant Design specific
+            f'.ant-btn:text-is("{text}")',
+            f'.ant-btn:has-text("{text}")',
+            f'.ant-btn-primary:has-text("{text}")',
+
+            # By role and text
+            f'[role="button"]:text-is("{text}")',
+            f'[role="button"]:has-text("{text}")',
+
+            # Input buttons
+            f'input[type="button"][value="{text}"]',
+            f'input[type="submit"][value="{text}"]',
+
+            # Generic button classes
+            f'*[class*="btn"]:has-text("{text}")',
+            f'*[class*="button"]:has-text("{text}")',
+
+            # Links styled as buttons
+            f'a[class*="btn"]:has-text("{text}")',
+            f'a[class*="button"]:has-text("{text}")',
+
+            # Buttons with spans/divs inside
+            f'button:has(span:text-is("{text}"))',
+            f'button:has(div:text-is("{text}"))',
+
+            # Case-insensitive match
+            f'button:text-is("{text}" i)',
+            f'.ant-btn:text-is("{text}" i)',
+        ]
+
+        # Special handling for buttons with icons or special characters
+        if text and any(char in text for char in ['+', '-', '*', '/', '>', '<']):
+            clean_text = re.sub(r'[+\-*/<>]', '', text).strip()
+            selectors.extend([
+                f'button:has-text("{clean_text}")',
+                f'.ant-btn:has-text("{clean_text}")',
+                # Also try with the special character
+                f'button:has(*:text-is("{text}"))',
+                f'.ant-btn:has(*:text-is("{text}"))',
+            ])
 
         for selector in selectors:
             try:
-                locator = page.locator(selector)
-                if locator.count() > 0:
-                    for i in range(min(locator.count(), 5)):
-                        element = locator.nth(i)
-                        if element.is_visible():
-                            is_clickable = element.evaluate("""
+                elements = page.locator(selector)
+                count = elements.count()
+                if count > 0:
+                    # Try to find the most visible/relevant button
+                    for i in range(min(count, 5)):
+                        element = elements.nth(i)
+                        if element.is_visible() and element.is_enabled():
+                            # Additional check for button validity
+                            is_button = element.evaluate("""
                                 (el) => {
-                                    if (el.onclick || el.type === 'button' || el.type === 'submit' ||
-                                        el.tagName === 'BUTTON' || el.role === 'button' ||
-                                        el.style.cursor === 'pointer') {
-                                        return true;
-                                    }
-                                    const classNames = el.className || '';
-                                    if (classNames.includes('btn') || classNames.includes('button')) {
-                                        return true;
-                                    }
-                                    return false;
+                                    const tag = el.tagName.toLowerCase();
+                                    const type = el.getAttribute('type') || '';
+                                    const role = el.getAttribute('role') || '';
+                                    const classes = el.className || '';
+
+                                    return tag === 'button' || 
+                                           type === 'button' || 
+                                           type === 'submit' ||
+                                           role === 'button' ||
+                                           classes.includes('btn') ||
+                                           classes.includes('button');
                                 }
                             """)
-                            if is_clickable:
+
+                            if is_button:
                                 logger.info(f"Found button using selector: {selector}")
                                 return element
             except Exception as e:
                 logger.debug(f"Selector {selector} failed: {e}")
                 continue
 
+        # Fallback: try to find by visible text anywhere on page
         return self._fallback_button_search_sync(page, text)
 
     async def _find_button_enhanced_async(self, page: AsyncPage, text: str, attributes: Dict) -> Optional[AsyncLocator]:
         """Enhanced button finding logic - asynchronous"""
         logger.info(f"Enhanced button search for: {text}")
 
-        selectors = self._get_button_selectors(text)
+        # Same comprehensive selectors as sync version
+        selectors = [
+            # Exact text match
+            f'button:text-is("{text}")',
+            f'button:has-text("{text}")',
+
+            # Ant Design specific
+            f'.ant-btn:text-is("{text}")',
+            f'.ant-btn:has-text("{text}")',
+            f'.ant-btn-primary:has-text("{text}")',
+
+            # By role and text
+            f'[role="button"]:text-is("{text}")',
+            f'[role="button"]:has-text("{text}")',
+
+            # Input buttons
+            f'input[type="button"][value="{text}"]',
+            f'input[type="submit"][value="{text}"]',
+
+            # Generic button classes
+            f'*[class*="btn"]:has-text("{text}")',
+            f'*[class*="button"]:has-text("{text}")',
+
+            # Links styled as buttons
+            f'a[class*="btn"]:has-text("{text}")',
+            f'a[class*="button"]:has-text("{text}")',
+
+            # Buttons with spans/divs inside
+            f'button:has(span:text-is("{text}"))',
+            f'button:has(div:text-is("{text}"))',
+
+            # Case-insensitive match
+            f'button:text-is("{text}" i)',
+            f'.ant-btn:text-is("{text}" i)',
+        ]
+
+        # Special handling for buttons with icons or special characters
+        if text and any(char in text for char in ['+', '-', '*', '/', '>', '<']):
+            clean_text = re.sub(r'[+\-*/<>]', '', text).strip()
+            selectors.extend([
+                f'button:has-text("{clean_text}")',
+                f'.ant-btn:has-text("{clean_text}")',
+                # Also try with the special character
+                f'button:has(*:text-is("{text}"))',
+                f'.ant-btn:has(*:text-is("{text}"))',
+            ])
 
         for selector in selectors:
             try:
-                locator = page.locator(selector)
-                count = await locator.count()
+                elements = page.locator(selector)
+                count = await elements.count()
                 if count > 0:
+                    # Try to find the most visible/relevant button
                     for i in range(min(count, 5)):
-                        element = locator.nth(i)
-                        if await element.is_visible():
-                            is_clickable = await element.evaluate("""
+                        element = elements.nth(i)
+                        if await element.is_visible() and await element.is_enabled():
+                            # Additional check for button validity
+                            is_button = await element.evaluate("""
                                 (el) => {
-                                    if (el.onclick || el.type === 'button' || el.type === 'submit' ||
-                                        el.tagName === 'BUTTON' || el.role === 'button' ||
-                                        el.style.cursor === 'pointer') {
-                                        return true;
-                                    }
-                                    const classNames = el.className || '';
-                                    if (classNames.includes('btn') || classNames.includes('button')) {
-                                        return true;
-                                    }
-                                    return false;
+                                    const tag = el.tagName.toLowerCase();
+                                    const type = el.getAttribute('type') || '';
+                                    const role = el.getAttribute('role') || '';
+                                    const classes = el.className || '';
+
+                                    return tag === 'button' || 
+                                           type === 'button' || 
+                                           type === 'submit' ||
+                                           role === 'button' ||
+                                           classes.includes('btn') ||
+                                           classes.includes('button');
                                 }
                             """)
-                            if is_clickable:
+
+                            if is_button:
                                 logger.info(f"Found button using selector: {selector}")
                                 return element
             except Exception as e:
                 logger.debug(f"Selector {selector} failed: {e}")
                 continue
 
+        # Fallback: try to find by visible text anywhere on page
         return await self._fallback_button_search_async(page, text)
 
     def _get_button_selectors(self, text: str) -> List[str]:
@@ -998,16 +1119,51 @@ class DOMStrategy(DetectionStrategy):
     def _fallback_button_search_sync(self, page: SyncPage, text: str) -> Optional[SyncLocator]:
         """Fallback button search - synchronous"""
         try:
-            text_locator = page.locator(f'*:has-text("{text}"):visible')
-            for i in range(min(text_locator.count(), 10)):
-                element = text_locator.nth(i)
-                tag_name = element.evaluate("el => el.tagName.toLowerCase()")
-                class_name = element.get_attribute("class") or ""
+            # Try to find any element with the text that might be clickable
+            text_elements = page.locator(f'*:has-text("{text}"):visible').all()
 
-                if (tag_name in ['button', 'a', 'input'] or
-                        'btn' in class_name or 'button' in class_name):
-                    logger.info(f"Found potential button by fallback: tag={tag_name}, class={class_name}")
+            for element in text_elements[:10]:
+                # Check if element or parent is clickable
+                is_clickable = element.evaluate("""
+                    (el) => {
+                        // Check current element
+                        const tag = el.tagName.toLowerCase();
+                        const role = el.getAttribute('role') || '';
+                        const classes = el.className || '';
+                        const cursor = window.getComputedStyle(el).cursor;
+
+                        if (tag === 'button' || tag === 'a' || 
+                            role === 'button' || role === 'link' ||
+                            classes.includes('btn') || classes.includes('button') ||
+                            cursor === 'pointer') {
+                            return true;
+                        }
+
+                        // Check parent elements
+                        let parent = el.parentElement;
+                        while (parent && parent !== document.body) {
+                            const pTag = parent.tagName.toLowerCase();
+                            const pRole = parent.getAttribute('role') || '';
+                            const pClasses = parent.className || '';
+                            const pCursor = window.getComputedStyle(parent).cursor;
+
+                            if (pTag === 'button' || pTag === 'a' ||
+                                pRole === 'button' || pRole === 'link' ||
+                                pClasses.includes('btn') || pClasses.includes('button') ||
+                                pCursor === 'pointer') {
+                                return true;
+                            }
+                            parent = parent.parentElement;
+                        }
+
+                        return false;
+                    }
+                """)
+
+                if is_clickable:
+                    logger.info(f"Found clickable element with text '{text}' using fallback")
                     return element
+
         except Exception as e:
             logger.debug(f"Fallback button search failed: {e}")
 
@@ -1016,23 +1172,57 @@ class DOMStrategy(DetectionStrategy):
     async def _fallback_button_search_async(self, page: AsyncPage, text: str) -> Optional[AsyncLocator]:
         """Fallback button search - asynchronous"""
         try:
-            text_locator = page.locator(f'*:has-text("{text}"):visible')
-            count = await text_locator.count()
-            for i in range(min(count, 10)):
-                element = text_locator.nth(i)
-                tag_name = await element.evaluate("el => el.tagName.toLowerCase()")
-                class_name = await element.get_attribute("class") or ""
+            # Try to find any element with the text that might be clickable
+            text_elements = await page.locator(f'*:has-text("{text}"):visible').all()
 
-                if (tag_name in ['button', 'a', 'input'] or
-                        'btn' in class_name or 'button' in class_name):
-                    logger.info(f"Found potential button by fallback: tag={tag_name}, class={class_name}")
+            for element in text_elements[:10]:
+                # Check if element or parent is clickable
+                is_clickable = await element.evaluate("""
+                    (el) => {
+                        // Check current element
+                        const tag = el.tagName.toLowerCase();
+                        const role = el.getAttribute('role') || '';
+                        const classes = el.className || '';
+                        const cursor = window.getComputedStyle(el).cursor;
+
+                        if (tag === 'button' || tag === 'a' || 
+                            role === 'button' || role === 'link' ||
+                            classes.includes('btn') || classes.includes('button') ||
+                            cursor === 'pointer') {
+                            return true;
+                        }
+
+                        // Check parent elements
+                        let parent = el.parentElement;
+                        while (parent && parent !== document.body) {
+                            const pTag = parent.tagName.toLowerCase();
+                            const pRole = parent.getAttribute('role') || '';
+                            const pClasses = parent.className || '';
+                            const pCursor = window.getComputedStyle(parent).cursor;
+
+                            if (pTag === 'button' || pTag === 'a' ||
+                                pRole === 'button' || pRole === 'link' ||
+                                pClasses.includes('btn') || pClasses.includes('button') ||
+                                pCursor === 'pointer') {
+                                return true;
+                            }
+                            parent = parent.parentElement;
+                        }
+
+                        return false;
+                    }
+                """)
+
+                if is_clickable:
+                    logger.info(f"Found clickable element with text '{text}' using fallback")
                     return element
+
         except Exception as e:
             logger.debug(f"Fallback button search failed: {e}")
 
         return None
 
-    # Rest of the existing methods remain unchanged
+
     def _find_by_exact_text_sync(self, page: SyncPage, element_type: str,
                                  text: str, attributes: Dict) -> Optional[SyncLocator]:
         """Find by exact text match - synchronous"""

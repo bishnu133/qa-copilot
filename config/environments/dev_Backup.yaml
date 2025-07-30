@@ -4,7 +4,7 @@
 environment: "development"
 
 # Base URLs
-base_url: "https://pph-web-gateway-ccsit.southeastasia.cloudapp.azure.com/web/h365-portal/"
+base_url: "https://example.com"
 
 # API configuration
 api_config_path: "config/api_config.yaml"
