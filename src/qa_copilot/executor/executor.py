@@ -320,10 +320,14 @@ class TestExecutor:
         @registry.when(r'I click on "([^"]*)"')
         @registry.when(r'I click "([^"]*)"')
         async def click_element(context: TestContext, element_desc: str):
-            element = await context.find_element(f"Click {element_desc}")
-            await element.click()
-            # Wait for potential navigation or dynamic content
-            await context.page.wait_for_load_state('networkidle')
+            try:
+                element = await context.find_element(f"Click {element_desc}")
+                await element.click()
+                # Wait for potential navigation or dynamic content
+                await context.page.wait_for_load_state('networkidle')
+            except Exception as e:
+                logger.error(f"Failed to click '{element_desc}': {e}")
+                raise Exception(f"Could not click element: {element_desc}")
 
         # Select/Dropdown steps
         @registry.when(r'I select "([^"]*)" in the "([^"]*)" dropdown')

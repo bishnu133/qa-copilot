@@ -358,50 +358,154 @@ class NLPStepExecutor:
         return {'logged_in': True, 'role': role}
 
     async def _handle_click(self, params: Dict) -> Any:
-        """Handle click actions"""
+        """Handle click actions with improved button detection"""
         element_desc = params.get('element', '')
 
-        # First try direct selectors for common elements
-        if element_desc.lower() == "challenges":
-            selectors = [
-                'a:has-text("Challenges")',
-                'button:has-text("Challenges")',
-                '[href*="challenges"]',
-                'nav a:has-text("Challenges")',
-                '.menu a:has-text("Challenges")',
-                '.sidebar a:has-text("Challenges")',
-                '[role="navigation"] a:has-text("Challenges")',
-                'li:has-text("Challenges") a',
-                'span:has-text("Challenges")',
-                'div:has-text("Challenges")'
+        logger.info(f"Attempting to click: {element_desc}")
+
+        # Special handling for "Next" button
+        if element_desc.lower() == "next":
+            # Try multiple selectors specifically for Next button
+            next_button_selectors = [
+                # Exact text matches
+                'button:text-is("Next")',
+                'button:text-is("Next"):visible',
+
+                # Ant Design patterns
+                '.ant-btn:text-is("Next")',
+                '.ant-btn:text-is("Next"):visible',
+                '.ant-btn-primary:text-is("Next")',
+                'button.ant-btn:text-is("Next")',
+
+                # Has-text variations
+                'button:has-text("Next"):visible',
+                '.ant-btn:has-text("Next"):visible',
+
+                # Generic button with text
+                '*[class*="btn"]:text-is("Next"):visible',
+                '*[class*="button"]:text-is("Next"):visible',
+
+                # By role
+                '[role="button"]:text-is("Next")',
+
+                # Last resort - any visible element with exact "Next" text
+                '*:text-is("Next"):visible',
             ]
 
-            for selector in selectors:
+            for selector in next_button_selectors:
                 try:
-                    element = self.page.locator(selector).first
-                    if await element.count() > 0 and await element.is_visible():
-                        await element.click()
-                        logger.info(f"Clicked {element_desc} using selector: {selector}")
-                        await self.page.wait_for_load_state('networkidle')
-                        return {'clicked': element_desc}
-                except:
+                    elements = self.page.locator(selector)
+                    count = await elements.count()
+
+                    if count > 0:
+                        # Try each matching element
+                        for i in range(count):
+                            element = elements.nth(i)
+
+                            # Verify it's actually visible and enabled
+                            if await element.is_visible() and await element.is_enabled():
+                                # Additional check to ensure it's a clickable element
+                                is_clickable = await element.evaluate("""
+                                    (el) => {
+                                        const tag = el.tagName.toLowerCase();
+                                        const role = el.getAttribute('role') || '';
+                                        const type = el.getAttribute('type') || '';
+                                        const classes = el.className || '';
+                                        const cursor = window.getComputedStyle(el).cursor;
+
+                                        return tag === 'button' || 
+                                               tag === 'a' ||
+                                               type === 'button' || 
+                                               type === 'submit' ||
+                                               role === 'button' ||
+                                               classes.includes('btn') ||
+                                               classes.includes('button') ||
+                                               cursor === 'pointer';
+                                    }
+                                """)
+
+                                if is_clickable:
+                                    logger.info(f"Found Next button with selector: {selector}, index: {i}")
+
+                                    # Scroll into view if needed
+                                    await element.scroll_into_view_if_needed()
+
+                                    # Small delay to ensure element is ready
+                                    await asyncio.sleep(0.1)
+
+                                    # Click the button
+                                    await element.click()
+
+                                    logger.info(f"Successfully clicked Next button")
+
+                                    # Wait for any navigation or state change
+                                    try:
+                                        # Wait for either navigation or DOM change
+                                        await self.page.wait_for_load_state('networkidle', timeout=5000)
+                                    except:
+                                        # If no navigation, just wait a bit for DOM updates
+                                        await asyncio.sleep(1)
+
+                                    return {'clicked': element_desc}
+
+                except Exception as e:
+                    logger.debug(f"Selector {selector} failed: {e}")
                     continue
 
-        # Fallback to element detector
-        element = await self.element_detector.find_async(
-            self.page,
-            f"Click {element_desc}"
-        )
+            # If specific Next button selectors fail, try generic approach
+            logger.warning("Could not find Next button with specific selectors, trying generic approach")
 
-        await element.click()
-
-        # Wait for any navigation
+        # Generic click handling for other elements
         try:
-            await self.page.wait_for_load_state('networkidle', timeout=3000)
-        except:
-            pass
+            # First try direct selectors for common elements
+            if element_desc.lower() == "challenges":
+                selectors = [
+                    'a:has-text("Challenges")',
+                    'button:has-text("Challenges")',
+                    '[href*="challenges"]',
+                    'nav a:has-text("Challenges")',
+                    '.menu a:has-text("Challenges")',
+                    '.sidebar a:has-text("Challenges")',
+                    '[role="navigation"] a:has-text("Challenges")',
+                    'li:has-text("Challenges") a',
+                    'span:has-text("Challenges")',
+                    'div:has-text("Challenges")'
+                ]
 
-        return {'clicked': element_desc}
+                for selector in selectors:
+                    try:
+                        element = self.page.locator(selector).first
+                        if await element.count() > 0 and await element.is_visible():
+                            await element.click()
+                            logger.info(f"Clicked {element_desc} using selector: {selector}")
+                            await self.page.wait_for_load_state('networkidle')
+                            return {'clicked': element_desc}
+                    except:
+                        continue
+
+            # Fallback to element detector
+            element = await self.element_detector.find_async(
+                self.page,
+                f"Click {element_desc}"
+            )
+
+            # Ensure element is ready
+            await element.scroll_into_view_if_needed()
+            await asyncio.sleep(0.1)
+
+            await element.click()
+
+            # Wait for any navigation
+            try:
+                await self.page.wait_for_load_state('networkidle', timeout=3000)
+            except:
+                await asyncio.sleep(0.5)
+
+            return {'clicked': element_desc}
+
+        except Exception as e:
+            logger.error(f"Failed to click '{element_desc}': {e}")
+            raise Exception(f"Could not click element: {element_desc}")
 
     async def _handle_input(self, params: Dict) -> Any:
         """Handle input actions"""
@@ -416,9 +520,48 @@ class NLPStepExecutor:
             'about', 'description', 'content', 'editor', 'rich text', 'message', 'details'
         ])
 
-        if is_rich_text:
-            # Try to find the rich text editor directly
+        if is_rich_text or force_ai:
+            logger.info(f"Detected rich text editor for: {element_desc}")
+
+            # Try to find the rich text editor using the form item approach
+            form_item_selector = f'.ant-form-item:has(label:text-is("{element_desc}"))'
+            try:
+                form_items = self.page.locator(form_item_selector)
+                count = await form_items.count()
+
+                if count > 0:
+                    form_item = form_items.first
+
+                    # Look for editors within this form item
+                    editor_selectors = ['.ql-editor', '[contenteditable="true"]']
+
+                    for editor_sel in editor_selectors:
+                        editor = form_item.locator(editor_sel).first
+                        if await editor.count() > 0 and await editor.is_visible():
+                            logger.info(f"Found editor in form item using: {editor_sel}")
+
+                            # Click to focus
+                            await editor.click()
+                            await asyncio.sleep(0.2)
+
+                            # Clear existing content
+                            await editor.click(click_count=3)  # Triple click to select all
+                            await self.page.keyboard.press('Delete')
+
+                            # Type new content
+                            await self.page.keyboard.type(value)
+
+                            logger.info("Successfully typed into rich text editor")
+                            return {'typed': value, 'element': element_desc}
+
+            except Exception as e:
+                logger.debug(f"Form item approach failed: {e}")
+
+            # Fallback to original rich text editor search
             rich_editor_selectors = [
+                # Most specific selectors based on diagnostic
+                f'.ant-form-item:has(label:text-is("{element_desc}")) .ql-editor',
+                f'.ant-form-item:has(label:has-text("{element_desc}")) .ql-editor',
                 # Quill editor patterns
                 '.ql-editor',
                 '.ql-container .ql-editor',
@@ -429,11 +572,6 @@ class NLPStepExecutor:
                 '.editor-content',
                 '.rich-text-editor',
                 '[role="textbox"][contenteditable="true"]',
-                # Based on field description
-                f'label:has-text("{element_desc}") + div .ql-editor',
-                f'label:has-text("{element_desc}") ~ div .ql-editor',
-                f'div:has(label:has-text("{element_desc}")) .ql-editor',
-                f'div.ant-form-item:has(label:has-text("{element_desc}")) .ql-editor',
             ]
 
             for selector in rich_editor_selectors:

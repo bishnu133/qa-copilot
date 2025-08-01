@@ -176,113 +176,47 @@ class DOMStrategy(DetectionStrategy):
         ])
 
         if is_rich_text:
-            # Enhanced rich text editor detection
-            logger.info(f"Detected rich text field: {field_name}")
-
-            # Strategy 1: Find by exact label match and look for editor in same container
+            # Strategy 1: Find the form item containing both the label and the editor
+            # This is the most reliable approach for Ant Design forms
+            form_item_selector = f'.ant-form-item:has(label:text-is("{field_name}"))'
             try:
-                # Find all labels with exact text
-                labels = await page.locator(f'label:text-is("{field_name}")').all()
+                form_items = page.locator(form_item_selector)
+                count = await form_items.count()
 
-                for label in labels:
-                    # Get the parent container (form item)
-                    parent_container = await label.evaluate("""
-                        (el) => {
-                            let current = el;
-                            while (current && current.parentElement) {
-                                const parent = current.parentElement;
-                                const classes = parent.className || '';
-                                // Look for form item containers
-                                if (classes.includes('ant-form-item') || 
-                                    classes.includes('form-group') || 
-                                    classes.includes('field-wrapper') ||
-                                    classes.includes('ant-row') ||
-                                    classes.includes('ant-col')) {
-                                    return parent.outerHTML;
-                                }
-                                current = parent;
-                            }
-                            return el.parentElement ? el.parentElement.outerHTML : null;
-                        }
-                    """)
+                if count > 0:
+                    # Get the first matching form item
+                    form_item = form_items.first
 
-                    if parent_container:
-                        # Look for editor within this container
-                        container_id = await label.evaluate("""
-                            (el) => {
-                                let current = el;
-                                while (current && current.parentElement) {
-                                    const parent = current.parentElement;
-                                    if (parent.id) return parent.id;
-                                    const classes = parent.className || '';
-                                    if (classes.includes('ant-form-item') || 
-                                        classes.includes('form-group')) {
-                                        // Generate a unique identifier
-                                        return 'container_' + Math.random().toString(36).substr(2, 9);
-                                    }
-                                    current = parent;
-                                }
-                                return null;
-                            }
-                        """)
+                    # Look for the editor within this form item
+                    editor_selectors = [
+                        '.ql-editor',  # Quill editor
+                        '[contenteditable="true"]',
+                        '.rich-text-editor',
+                        '.editor-content'
+                    ]
 
-                        # Try to find editor in the specific container
-                        editor_selectors = [
-                            '.ql-editor',
-                            '[contenteditable="true"]',
-                            '.rich-text-editor',
-                            '.editor-content',
-                            '[role="textbox"][contenteditable="true"]',
-                        ]
-
-                        for selector in editor_selectors:
-                            # Get all editors on page
-                            all_editors = await page.locator(selector).all()
-
-                            for editor in all_editors:
-                                # Check if editor is in our container
-                                is_in_container = await editor.evaluate("""
-                                    (el, fieldName) => {
-                                        // Walk up the DOM tree
-                                        let current = el;
-                                        while (current && current.parentElement) {
-                                            // Check for labels in parent
-                                            const labels = current.parentElement.querySelectorAll('label');
-                                            for (let label of labels) {
-                                                if (label.textContent.trim() === fieldName) {
-                                                    return true;
-                                                }
-                                            }
-                                            current = current.parentElement;
-                                        }
-                                        return false;
-                                    }
-                                """, field_name)
-
-                                if is_in_container and await editor.is_visible():
-                                    logger.info(f"Found rich text editor for '{field_name}' using container search")
-                                    return editor
+                    for editor_sel in editor_selectors:
+                        editor = form_item.locator(editor_sel).first
+                        if await editor.count() > 0 and await editor.is_visible():
+                            logger.info(f"Found rich text editor in form item for '{field_name}'")
+                            return editor
 
             except Exception as e:
-                logger.debug(f"Container search failed: {e}")
+                logger.debug(f"Form item strategy failed: {e}")
 
-            # Strategy 2: Try more specific selectors
+            # Strategy 2: Use more specific selectors based on diagnostic findings
             rich_selectors = [
-                # Direct label + editor combinations
-                f'label:text-is("{field_name}") + * .ql-editor',
-                f'label:text-is("{field_name}") ~ * .ql-editor',
-                f'div:has(> label:text-is("{field_name}")) .ql-editor',
+                # Based on diagnostic output - this works
                 f'.ant-form-item:has(label:text-is("{field_name}")) .ql-editor',
-                f'.ant-row:has(label:text-is("{field_name}")) .ql-editor',
-
-                # With contenteditable
-                f'label:text-is("{field_name}") + * [contenteditable="true"]',
-                f'label:text-is("{field_name}") ~ * [contenteditable="true"]',
+                # Try with partial match
+                f'.ant-form-item:has(label:has-text("{field_name}")) .ql-editor',
+                # Try contenteditable
                 f'.ant-form-item:has(label:text-is("{field_name}")) [contenteditable="true"]',
-
-                # Try with partial matches if exact doesn't work
-                f'label:has-text("{field_name}") + * .ql-editor',
-                f'label:has-text("{field_name}") ~ * .ql-editor',
+                # More generic form structures
+                f'div:has(> label:text-is("{field_name}")) ~ div .ql-editor',
+                f'label:text-is("{field_name}") ~ * .ql-editor',
+                # With row structure
+                f'.ant-row:has(label:text-is("{field_name}")) .ql-editor',
             ]
 
             for selector in rich_selectors:
@@ -298,12 +232,9 @@ class DOMStrategy(DetectionStrategy):
                     logger.debug(f"Rich text selector {selector} failed: {e}")
                     continue
 
-        # Continue with standard input field detection...
-        return await self._find_standard_input_field_async(page, field_name)
-
     async def _find_standard_input_field_async(self, page: AsyncPage, field_name: str) -> Optional[AsyncLocator]:
         """Find standard input fields"""
-        # Strategy 1: Direct label with 'for' attribute
+        # Continue with standard label-based search
         label_element = await self._find_label_element_async(page, field_name)
         if label_element:
             input_element = await self._find_input_from_label_async(page, label_element)
@@ -311,7 +242,13 @@ class DOMStrategy(DetectionStrategy):
                 logger.info(f"Found input using label 'for' attribute")
                 return input_element
 
-        # Strategy 2: Find text and look for nearby inputs
+        # Strategy 2: Find by form structure (PRIORITIZED)
+        input_element = await self._find_input_in_form_structure_async(page, field_name)
+        if input_element:
+            logger.info(f"Found input in form structure")
+            return input_element
+
+        # Strategy 3: Find text and look for nearby inputs
         text_element = await self._find_text_element_async(page, field_name)
         if text_element:
             input_element = await self._find_nearby_input_async(page, text_element, field_name)
@@ -319,16 +256,10 @@ class DOMStrategy(DetectionStrategy):
                 logger.info(f"Found input near text element")
                 return input_element
 
-        # Strategy 3: Look for inputs with matching attributes
+        # Strategy 4: Look for inputs with matching attributes
         input_element = await self._find_input_by_attributes_async(page, field_name)
         if input_element:
             logger.info(f"Found input by attributes")
-            return input_element
-
-        # Strategy 4: Find by form structure
-        input_element = await self._find_input_in_form_structure_async(page, field_name)
-        if input_element:
-            logger.info(f"Found input in form structure")
             return input_element
 
         return None
@@ -780,11 +711,18 @@ class DOMStrategy(DetectionStrategy):
                         elem = elements.nth(i)
                         if elem.is_visible() and elem.is_enabled():
                             # Check if input is empty
-                            value = elem.input_value() if hasattr(elem, 'input_value') else elem.get_attribute('value')
-                            if not value or value.strip() == '':
-                                return elem
+                            try:
+                                value = elem.input_value() if hasattr(elem, 'input_value') else elem.get_attribute('value')
+                                if not value or value.strip() == '':
+                                    return elem
+                            except:
+                                # If input_value fails, it might not be a standard input
+                                pass
                     # If no empty input found, return first visible
-                    return elements.first
+                    for i in range(elements.count()):
+                        elem = elements.nth(i)
+                        if elem.is_visible() and elem.is_enabled():
+                            return elem
             except:
                 continue
 
@@ -834,6 +772,13 @@ class DOMStrategy(DetectionStrategy):
     def _find_input_in_form_structure_sync(self, page: SyncPage, field_name: str) -> Optional[SyncLocator]:
         """Find input in form structure - synchronous"""
         try:
+            # First try the most specific selector that we know works
+            specific_selector = f'.ant-form-item:has(label:text-is("{field_name}")) input'
+            element = page.locator(specific_selector).first
+            if element.count() > 0 and element.is_visible():
+                logger.info(f"Found input using specific form item selector: {specific_selector}")
+                return element
+
             # Look for common form patterns
             form_selectors = [
                 '.ant-form-item',
@@ -866,6 +811,21 @@ class DOMStrategy(DetectionStrategy):
     async def _find_input_in_form_structure_async(self, page: AsyncPage, field_name: str) -> Optional[AsyncLocator]:
         """Find input in form structure - asynchronous"""
         try:
+            # First try the most specific selector that we know works
+            specific_selector = f'.ant-form-item:has(label:text-is("{field_name}")) input'
+            element = page.locator(specific_selector).first
+            if await element.count() > 0 and await element.is_visible():
+                logger.info(f"Found input using specific form item selector: {specific_selector}")
+                return element
+
+            # Also try with textarea
+            specific_selector_textarea = f'.ant-form-item:has(label:text-is("{field_name}")) textarea'
+            element = page.locator(specific_selector_textarea).first
+            if await element.count() > 0 and await element.is_visible():
+                logger.info(f"Found textarea using specific form item selector: {specific_selector_textarea}")
+                return element
+
+            # Look for common form patterns
             form_selectors = [
                 '.ant-form-item',
                 '.form-group',
@@ -1299,6 +1259,9 @@ class DOMStrategy(DetectionStrategy):
                 f'a:has-text("{text}")',
                 f'[role="link"]:has-text("{text}")',
             ]
+        elif element_type == "input":
+            # For input fields, be more specific
+            return None  # Let other strategies handle input fields
         else:
             selectors = [f'*:has-text("{text}")']
 
