@@ -3,6 +3,13 @@ from playwright.async_api import Page, Locator
 from dataclasses import dataclass, field
 import logging
 
+# Import date picker utilities
+try:
+    from .utils import DatePickerHandler, DateTimeParser
+except ImportError:
+    DatePickerHandler = None
+    DateTimeParser = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -356,3 +363,33 @@ class TestContext:
     async def reload(self):
         """Reload the current page"""
         await self.page.reload()
+
+    async def select_date(self, field_description: str, date_description: str):
+        """
+        Select a date using natural language
+
+        Args:
+            field_description: Natural language description of the date field
+            date_description: Natural language description of the date (e.g., "tomorrow", "next Monday")
+        """
+        if DateTimeParser and DatePickerHandler:
+            # Parse the date
+            date = DateTimeParser.parse(date_description)
+
+            # Use date picker handler
+            picker = DatePickerHandler(self.page)
+            success = await picker.select_date(field_description, date)
+
+            if not success:
+                raise Exception(f"Failed to select date '{date_description}' in field '{field_description}'")
+        else:
+            raise Exception("Date picker utilities not available")
+
+    async def select_date_range(self, field_description: str, start_description: str, end_description: str):
+        """
+        Select a date range using natural language
+
+        Args:
+            field_description: Natural language description of the date range field
+            start_description: Natural language from typing import Dict, Any, Optional, List
+        """

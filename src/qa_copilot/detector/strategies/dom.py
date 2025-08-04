@@ -170,6 +170,24 @@ class DOMStrategy(DetectionStrategy):
 
         logger.info(f"Looking for input field with label: '{field_name}'")
 
+        # PRIORITY 1: Try the most reliable Ant Design form pattern first
+        try:
+            # This selector works best for Ant Design forms
+            ant_form_selector = f'.ant-form-item:has(label:text-is("{field_name}")) input:visible'
+            element = page.locator(ant_form_selector).first
+            if await element.count() > 0:
+                logger.info(f"Found input using Ant Design form selector")
+                return element
+
+            # Try with partial match
+            ant_form_partial = f'.ant-form-item:has(label:has-text("{field_name}")) input:visible'
+            element = page.locator(ant_form_partial).first
+            if await element.count() > 0:
+                logger.info(f"Found input using Ant Design form selector (partial match)")
+                return element
+        except Exception as e:
+            logger.debug(f"Ant form selector failed: {e}")
+
         # Check if this might be a rich text editor
         is_rich_text = any(keyword in field_name.lower() for keyword in [
             'about', 'description', 'content', 'editor', 'rich text', 'message', 'details', 'key details'
@@ -231,6 +249,9 @@ class DOMStrategy(DetectionStrategy):
                 except Exception as e:
                     logger.debug(f"Rich text selector {selector} failed: {e}")
                     continue
+
+        # Continue with standard input field search
+        return await self._find_standard_input_field_async(page, field_name)
 
     async def _find_standard_input_field_async(self, page: AsyncPage, field_name: str) -> Optional[AsyncLocator]:
         """Find standard input fields"""

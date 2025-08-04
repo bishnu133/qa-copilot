@@ -813,6 +813,103 @@ class TestExecutor:
 
                 raise AssertionError(f"Option '{option_text}' is not selected")
 
+            # Newly added
+            # Add these step definitions to the _register_builtin_steps method in executor.py
+
+            # Date/Time generation steps
+            @registry.when(r'I generate datetime "([^"]*)" and store it as "([^"]*)"')
+            async def generate_datetime(context: TestContext, datetime_spec: str, variable_name: str):
+                """Generate and store a datetime value"""
+                from utils import DateTimeParser
+
+                # Parse the datetime
+                parsed_date = DateTimeParser.parse(datetime_spec)
+
+                # Store in multiple formats for flexibility
+                context.store_data(variable_name, {
+                    'datetime': parsed_date,
+                    'formatted': parsed_date.strftime('%Y/%m/%d %H:%M'),
+                    'date_only': parsed_date.strftime('%Y/%m/%d'),
+                    'time_only': parsed_date.strftime('%H:%M'),
+                    'iso': parsed_date.isoformat()
+                })
+
+                logger.info(f"Generated datetime '{datetime_spec}' = {parsed_date} stored as '{variable_name}'")
+
+            # Date selection steps
+            @registry.when(r'I select date "([^"]*)" in "([^"]*)" field')
+            @registry.when(r'I select date "([^"]*)" in the "([^"]*)" field')
+            async def select_date(context: TestContext, date_spec: str, field_name: str):
+                """Select a date in a date picker field"""
+                # Handle variable substitution
+                if date_spec.startswith('${') and date_spec.endswith('}'):
+                    var_name = date_spec[2:-1]
+                    stored_data = context.get_data(var_name)
+                    if isinstance(stored_data, dict):
+                        date_obj = stored_data.get('datetime')
+                    else:
+                        # Parse if it's a string
+                        from utils import DateTimeParser
+                        date_obj = DateTimeParser.parse(stored_data)
+                else:
+                    # Parse the date specification
+                    from utils import DateTimeParser
+                    date_obj = DateTimeParser.parse(date_spec)
+
+                # Use date picker handler
+                from utils import DatePickerHandler
+                picker = DatePickerHandler(context.page)
+
+                success = await picker.select_date(field_name, date_obj)
+                if not success:
+                    raise Exception(f"Failed to select date in field '{field_name}'")
+
+            # Date range selection steps
+            @registry.when(r'I select date range "\$\{([^}]*)\}" to "\$\{([^}]*)\}" in "([^"]*)" field')
+            async def select_date_range_vars(context: TestContext, start_var: str, end_var: str, field_name: str):
+                """Select a date range using stored variables"""
+                # Get stored dates
+                start_data = context.get_data(start_var)
+                end_data = context.get_data(end_var)
+
+                # Extract datetime objects
+                if isinstance(start_data, dict):
+                    start_date = start_data.get('datetime')
+                else:
+                    from utils import DateTimeParser
+                    start_date = DateTimeParser.parse(start_data)
+
+                if isinstance(end_data, dict):
+                    end_date = end_data.get('datetime')
+                else:
+                    from utils import DateTimeParser
+                    end_date = DateTimeParser.parse(end_data)
+
+                # Use date picker handler
+                from utils import DatePickerHandler
+                picker = DatePickerHandler(context.page)
+
+                success = await picker.select_date_range(field_name, start_date, end_date)
+                if not success:
+                    raise Exception(f"Failed to select date range in field '{field_name}'")
+
+            @registry.when(r'I select date range "([^"]*)" to "([^"]*)" in "([^"]*)" field')
+            async def select_date_range_direct(context: TestContext, start_spec: str, end_spec: str,
+                                               field_name: str):
+                """Select a date range using direct date specifications"""
+                from utils import DateTimeParser, DatePickerHandler
+
+                # Parse the dates
+                start_date = DateTimeParser.parse(start_spec)
+                end_date = DateTimeParser.parse(end_spec)
+
+                # Use date picker handler
+                picker = DatePickerHandler(context.page)
+
+                success = await picker.select_date_range(field_name, start_date, end_date)
+                if not success:
+                    raise Exception(f"Failed to select date range in field '{field_name}'")
+
     async def execute_feature(self, feature_path: Union[str, Path]) -> Dict[str, Any]:
         """Execute a single feature file"""
         feature_path = Path(feature_path)

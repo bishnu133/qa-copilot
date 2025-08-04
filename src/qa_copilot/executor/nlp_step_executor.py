@@ -10,6 +10,14 @@ from playwright.async_api import Page, Locator
 from datetime import datetime, timedelta
 import logging
 
+# Import date picker utilities
+try:
+    from ..utils import DatePickerHandler, DateTimeParser
+except ImportError:
+    # Fallback if utils not available
+    DatePickerHandler = None
+    DateTimeParser = None
+
 logger = logging.getLogger(__name__)
 
 
